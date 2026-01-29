@@ -1,0 +1,159 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use PhpSoftBox\CliApp\CliApp;
+use PhpSoftBox\CliApp\Command\InMemoryCommandRegistry;
+use PhpSoftBox\CliApp\Config\CliAppConfig;
+use PhpSoftBox\CliApp\Config\PackageCommandDiscovery;
+use PhpSoftBox\CliApp\Io\ConsoleIo;
+use PhpSoftBox\CliApp\Loader\CommandScanner;
+use PhpSoftBox\CliApp\Loader\CommandProviderInterface;
+use PhpSoftBox\CliApp\Loader\SimpleCommandLoader;
+use PhpSoftBox\CliApp\Runner\RunnerInterface;
+
+$autoload = null;
+$autoloadCandidates = [
+    __DIR__ . '/../autoload.php',
+    __DIR__ . '/../../../autoload.php',
+    getcwd() . '/vendor/autoload.php',
+];
+foreach ($autoloadCandidates as $candidate) {
+    if (is_file($candidate)) {
+        $autoload = $candidate;
+        break;
+    }
+}
+if ($autoload === null) {
+    fwrite(STDERR, "Autoload file not found. Run composer install.\n");
+    exit(1);
+}
+require $autoload;
+
+$argv = $_SERVER['argv'] ?? [];
+array_shift($argv);
+$command = $argv[0] ?? '';
+if ($command !== '') {
+    array_shift($argv);
+}
+
+$runner = null;
+$configPath = null;
+$envPath = getenv('PSB_CLI_APP_CONFIG_PATH');
+if ($envPath !== false && $envPath !== '') {
+    $configPath = $envPath[0] === '/' ? $envPath : (getcwd() . '/' . $envPath);
+    if (!is_file($configPath)) {
+        fwrite(STDERR, "Config file not found: {$configPath}\n");
+        exit(2);
+    }
+} else {
+    $candidate = getcwd() . '/config/cli-app.php';
+    if (is_file($candidate)) {
+        $configPath = $candidate;
+    }
+}
+
+if ($configPath !== null) {
+    $baseDir = dirname($configPath);
+    $configResult = require $configPath;
+    if (is_callable($configResult)) {
+        $configResult = $configResult();
+    }
+
+    if ($configResult instanceof RunnerInterface) {
+        $runner = $configResult;
+    } elseif ($configResult instanceof CliApp) {
+        $runner = $configResult->runner();
+    } elseif ($configResult instanceof CliAppConfig || is_array($configResult)) {
+        $config = $configResult instanceof CliAppConfig
+            ? $configResult
+            : CliAppConfig::fromArray($configResult, $baseDir);
+
+        if ($config->bootstrapFile !== null) {
+            if (!is_file($config->bootstrapFile)) {
+                fwrite(STDERR, "Bootstrap file not found: {$config->bootstrapFile}\n");
+                exit(2);
+            }
+            $bootstrap = require $config->bootstrapFile;
+            if (is_callable($bootstrap)) {
+                $bootstrap = $bootstrap();
+            }
+            if ($bootstrap instanceof RunnerInterface) {
+                $runner = $bootstrap;
+            } elseif ($bootstrap instanceof CliApp) {
+                $runner = $bootstrap->runner();
+            } else {
+                fwrite(STDERR, "Bootstrap file must return CliApp or RunnerInterface.\n");
+                exit(2);
+            }
+        } else {
+            $vendorDir = getcwd() . '/vendor';
+            $discovered = PackageCommandDiscovery::discover($vendorDir);
+
+            $commandPaths = array_merge($config->commandPaths, $discovered['paths']);
+            $commandFiles = array_merge($config->commandFiles, $discovered['files']);
+            $providers = array_merge($config->commandProviders, $discovered['providers']);
+
+            $validPaths = [];
+            foreach ($commandPaths as $path) {
+                if (!is_dir($path)) {
+                    fwrite(STDERR, "Command path not found: {$path}\n");
+                    continue;
+                }
+                $validPaths[] = $path;
+            }
+            $validFiles = [];
+            foreach ($commandFiles as $file) {
+                if (!is_file($file)) {
+                    fwrite(STDERR, "Command file not found: {$file}\n");
+                    continue;
+                }
+                $validFiles[] = $file;
+            }
+
+            $registry = new InMemoryCommandRegistry(withDefaultCommands: $config->withDefaultCommands);
+            $scanner = new CommandScanner(new SimpleCommandLoader(), $registry);
+            $scanner->register(paths: $validPaths, files: $validFiles);
+
+            foreach ($providers as $provider) {
+                $class = $provider['class'] ?? '';
+                $priority = (int) ($provider['priority'] ?? 0);
+                if ($class === '') {
+                    continue;
+                }
+                if (method_exists($registry, 'addProvider')) {
+                    $registry->addProvider($class, $priority);
+                    continue;
+                }
+                if (!class_exists($class)) {
+                    fwrite(STDERR, "Command provider not found: {$class}\n");
+                    continue;
+                }
+                $instance = new $class();
+                if (!$instance instanceof CommandProviderInterface) {
+                    fwrite(STDERR, "Command provider must implement CommandProviderInterface: {$class}\n");
+                    continue;
+                }
+                $instance->register($registry);
+            }
+
+            $app = new CliApp($registry, new ConsoleIo());
+            $runner = $app->runner();
+        }
+    } else {
+        fwrite(STDERR, "Config file must return CliApp, RunnerInterface, CliAppConfig or array.\n");
+        exit(2);
+    }
+}
+
+if ($runner === null) {
+    $registry = new InMemoryCommandRegistry();
+    $scanner = new CommandScanner(new SimpleCommandLoader(), $registry);
+    $scanner->register(paths: [getcwd() . '/console', getcwd() . '/commands']);
+    $app = new CliApp($registry, new ConsoleIo());
+    $runner = $app->runner();
+}
+
+$response = $runner->run($command, $argv);
+exit($response->code);
