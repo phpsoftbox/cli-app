@@ -12,7 +12,6 @@ use function array_values;
 use function class_exists;
 use function count;
 use function explode;
-use function getenv;
 use function ksort;
 use function max;
 use function mb_strlen;
@@ -55,15 +54,13 @@ abstract class AbstractCommandRegistry implements CommandRegistryInterface, Glob
      */
     protected function defaultGlobalOptions(): array
     {
-        $env = getenv('APP_ENV') ?: 'production';
-
         return [
+            // Без значения по умолчанию: окружение приложения определяет RunnerInterface::environment().
             new OptionDefinition(
                 name: 'environment',
                 short: 'e',
-                description: 'Environment (from APP_ENV)',
+                description: 'Environment (default: application environment)',
                 required: false,
-                default: $env,
                 type: 'string',
             ),
             new OptionDefinition(
@@ -95,11 +92,10 @@ abstract class AbstractCommandRegistry implements CommandRegistryInterface, Glob
 
     public function get(string $name): ?CommandDefinition
     {
-        if (isset($this->commands[$name])) {
-            return $this->commands[$name];
-        }
-
-        $this->loadProvidersUntil(fn () => isset($this->commands[$name]));
+        // Провайдеры с приоритетом не ниже найденного могут переопределить команду — как в all(), грузим и их.
+        $this->loadProvidersUntil(
+            fn (int $nextPriority): bool => isset($this->commands[$name]) && $nextPriority < $this->commandPriorities[$name],
+        );
 
         return $this->commands[$name] ?? null;
     }
@@ -127,6 +123,10 @@ abstract class AbstractCommandRegistry implements CommandRegistryInterface, Glob
         foreach ($this->providers as $i => $provider) {
             if ($provider['loaded']) {
                 continue;
+            }
+
+            if (!$loadAll && $stop($provider['priority'])) {
+                return;
             }
 
             $class = $provider['class'];
@@ -166,10 +166,6 @@ abstract class AbstractCommandRegistry implements CommandRegistryInterface, Glob
             });
 
             $this->providers[$i]['loaded'] = true;
-
-            if (!$loadAll && $stop()) {
-                return;
-            }
         }
     }
 

@@ -49,4 +49,63 @@ final class EnvironmentRestrictionTest extends TestCase
         self::assertSame(Response::FAILURE, $resp->code);
         self::assertFalse($called);
     }
+
+    /**
+     * Проверим, что без `--environment` окружение берётся из резолвера приложения: команда только для `prod`
+     * выполняется в приложении, работающем в `prod`.
+     *
+     * @see RunnerInterface::environment()
+     */
+    #[Test]
+    public function usesApplicationEnvironmentByDefault(): void
+    {
+        $registry = new InMemoryCommandRegistry(withDefaultCommands: false);
+
+        $app  = new CliApp($registry, new NullIo(), environmentResolver: static fn (): string => 'prod');
+        $seen = null;
+
+        $registry->register(Command::define(
+            name: 'deploy',
+            description: 'Prod only',
+            signature: [],
+            handler: function (RunnerInterface $runner) use (&$seen) {
+                $seen = $runner->environment();
+
+                return Response::SUCCESS;
+            },
+            environments: ['prod'],
+        ));
+
+        self::assertSame(Response::SUCCESS, $app->runner()->run('deploy', [])->code);
+        self::assertSame('prod', $seen);
+    }
+
+    /**
+     * Проверим, что `--environment` имеет приоритет над окружением приложения.
+     *
+     * @see RunnerInterface::environment()
+     */
+    #[Test]
+    public function optionOverridesApplicationEnvironment(): void
+    {
+        $registry = new InMemoryCommandRegistry(withDefaultCommands: false);
+
+        $app  = new CliApp($registry, new NullIo(), environmentResolver: static fn (): string => 'prod');
+        $seen = null;
+
+        $registry->register(Command::define(
+            name: 'show',
+            description: 'Show env',
+            signature: [],
+            handler: function (RunnerInterface $runner) use (&$seen) {
+                $seen = $runner->environment();
+
+                return Response::SUCCESS;
+            },
+        ));
+
+        $app->runner()->run('show', ['-e', 'test']);
+
+        self::assertSame('test', $seen);
+    }
 }

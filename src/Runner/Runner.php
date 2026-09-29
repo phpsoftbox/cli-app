@@ -18,8 +18,8 @@ use PhpSoftBox\CliApp\Request\Request;
 use PhpSoftBox\CliApp\Request\RequestParser;
 use PhpSoftBox\CliApp\Response;
 use RuntimeException;
+use Throwable;
 
-use function getenv;
 use function in_array;
 use function is_callable;
 use function is_int;
@@ -55,39 +55,45 @@ final class Runner implements RunnerInterface
 
         $this->events->dispatch(Events::BEFORE_RUN, ['command' => $definition, 'argv' => $argv]);
 
-        $signature            = $this->buildSignature($definition);
-        $this->currentRequest = RequestParser::parse($signature, $argv);
-
-        if ($this->currentRequest->option('help') === true) {
-            return $this->errorHandler->showHelp($definition, $this);
-        }
-
-        if ($this->currentRequest->hasErrors()) {
-            $resp = $this->errorHandler->invalidInput($definition, $this->currentRequest, $this);
-            $this->events->dispatch(Events::ERROR, ['command' => $definition, 'response' => $resp]);
-
-            return $resp;
-        }
-
-        $env = (string) $this->currentRequest->option('environment', getenv('APP_ENV') ?: 'production');
-        if ($definition->environments !== [] && !in_array($env, $definition->environments, true)) {
-            $resp = $this->errorHandler->environmentNotAllowed($definition, $env, $this);
-            $this->events->dispatch(Events::ERROR, ['command' => $definition, 'response' => $resp]);
-
-            return $resp;
-        }
-
         try {
-            $handler = $this->app->resolveHandler($definition);
-            $result  = $definition->asDaemon
-                ? $this->invokeDaemonHandler($handler)
-                : $this->invokeHandler($handler);
+            $this->currentRequest = RequestParser::parse($this->buildSignature($definition), $argv);
+
+            if ($this->currentRequest->option('help') === true) {
+                return $this->errorHandler->showHelp($definition, $this);
+            }
+
+            if ($this->currentRequest->hasErrors()) {
+                $resp = $this->errorHandler->invalidInput($definition, $this->currentRequest, $this);
+                $this->events->dispatch(Events::ERROR, ['command' => $definition, 'response' => $resp]);
+
+                return $resp;
+            }
+
+            $env = $this->environment();
+            if ($definition->environments !== [] && !in_array($env, $definition->environments, true)) {
+                $resp = $this->errorHandler->environmentNotAllowed($definition, $env, $this);
+                $this->events->dispatch(Events::ERROR, ['command' => $definition, 'response' => $resp]);
+
+                return $resp;
+            }
+
+            try {
+                $handler = $this->app->resolveHandler($definition);
+                $result  = $definition->asDaemon
+                    ? $this->invokeDaemonHandler($handler)
+                    : $this->invokeHandler($handler);
+            } catch (Throwable $exception) {
+                $this->events->dispatch(Events::ERROR, ['command' => $definition, 'exception' => $exception]);
+
+                throw $exception;
+            }
+
             $resp = $this->normalizeResponse($result);
             $this->events->dispatch(Events::AFTER_RUN, ['command' => $definition, 'response' => $resp]);
 
             return $resp;
         } finally {
-            // Восстанавливаем исходный request (для вложенных вызовов).
+            // Исходный request восстанавливается на любом выходе (для вложенных вызовов).
             $this->currentRequest = $prevRequest;
         }
     }
@@ -108,6 +114,13 @@ final class Runner implements RunnerInterface
     public function io(): IoInterface
     {
         return $this->io;
+    }
+
+    public function environment(): string
+    {
+        $option = $this->currentRequest->option('environment');
+
+        return is_string($option) && $option !== '' ? $option : $this->app->environment();
     }
 
     private function invokeHandler(mixed $handler): mixed

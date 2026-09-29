@@ -90,8 +90,14 @@ return Command::define(
     description: 'Seed database',
     signature: [],
     handler: fn (RunnerInterface $runner) => Response::SUCCESS,
-    environments: ['local', 'staging'],
+    environments: ['dev', 'test'],
 );
 ```
 
-Глобальная опция `--environment` (`-e`) добавляется автоматически через реестр.
+Окружение команды — `RunnerInterface::environment()`: значение глобальной опции `--environment` (`-e`), а без неё —
+окружение приложения. Его сообщает резолвер, переданный в `CliApp` (`environmentResolver`); без резолвера —
+`APP_ENV` процесса, иначе `dev`. Скелет AppBackend передаёт `Environment::detect()`, поэтому команды видят то же
+окружение (`dev`, `test`, `demo`, `prod`), что и приложение, включая значение из `.env`.
+
+`-e` меняет только окружение команды (проверку `environments` и, например, ключ очищаемого кеша); контейнер
+приложения к этому моменту уже собран для окружения приложения.

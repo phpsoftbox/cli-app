@@ -45,14 +45,10 @@ if ($command !== '') {
 }
 
 /**
- * В некоторых окружениях имя исполняемого скрипта может "протечь" в позиционные аргументы.
- * Например: php psb some:command psb arg1 arg2
+ * В некоторых окружениях путь к исполняемому скрипту "протекает" в позиционные аргументы. Отбрасывается только один
+ * такой аргумент и только если это полный путь к скрипту: аргумент, совпадающий с коротким именем (`psb`), — данные.
  */
-while (
-    ($commandArgs[0] ?? null) !== null
-    && is_string($commandArgs[0])
-    && isScriptArgToken($commandArgs[0], $scriptArg)
-) {
+if (($commandArgs[0] ?? null) !== null && is_string($commandArgs[0]) && isScriptArgToken($commandArgs[0], $scriptArg)) {
     array_shift($commandArgs);
 }
 
@@ -186,24 +182,9 @@ try {
 
 function isScriptArgToken(string $value, string $scriptArg): bool
 {
-    $normalizedValue = normalizeScriptArgToken($value);
-    if ($normalizedValue === '') {
-        return false;
-    }
-
     $normalizedScript = normalizeScriptArgToken($scriptArg);
-    if ($normalizedScript !== '' && $normalizedValue === $normalizedScript) {
-        return true;
-    }
 
-    $scriptBase = basename($normalizedScript);
-    if ($scriptBase !== '' && $normalizedValue === $scriptBase) {
-        return true;
-    }
-
-    $selfBase = basename(normalizeScriptArgToken(__FILE__));
-
-    return $selfBase !== '' && $normalizedValue === $selfBase;
+    return str_contains($normalizedScript, '/') && normalizeScriptArgToken($value) === $normalizedScript;
 }
 
 function normalizeScriptArgToken(string $value): string

@@ -15,6 +15,7 @@ use function explode;
 use function filter_var;
 use function implode;
 use function in_array;
+use function preg_match;
 use function str_contains;
 use function str_split;
 use function str_starts_with;
@@ -26,6 +27,10 @@ use const FILTER_VALIDATE_INT;
 
 /**
  * Парсер argv согласно сигнатуре.
+ *
+ * - `--` завершает опции: всё после него — позиционные аргументы;
+ * - `-5`, `-1.5` — позиционные аргументы (отрицательные числа), если нет короткой опции `-5`;
+ * - значения по умолчанию подставляются только для незаданных опций: повторяемая опция не дописывается к default.
  */
 final class RequestParser
 {
@@ -44,21 +49,25 @@ final class RequestParser
             if ($opt->short !== null) {
                 $shortMap[$opt->short] = $opt->name;
             }
-            if ($opt->default !== null) {
-                $options[$opt->name] = $opt->default;
-            } elseif ($opt->flag) {
-                $options[$opt->name] = false;
-            }
         }
 
         $argDefs  = $signature->arguments();
         $argIndex = 0;
         $argc     = count($argv);
 
+        $optionsEnded = false;
+
         for ($i = 0; $i < $argc; $i++) {
             $token = $argv[$i];
 
-            if (str_starts_with($token, '--')) {
+            if (!$optionsEnded && $token === '--') {
+                $optionsEnded = true;
+                continue;
+            }
+
+            $negativeNumber = preg_match('/^-\d+(\.\d+)?$/', $token) === 1 && !isset($shortMap[$token[1]]);
+
+            if (!$optionsEnded && str_starts_with($token, '--')) {
                 $nameValue                 = substr($token, 2);
                 [$name, $value, $hasValue] = self::splitLong($nameValue);
 
@@ -96,7 +105,7 @@ final class RequestParser
                 continue;
             }
 
-            if (str_starts_with($token, '-') && $token !== '-') {
+            if (!$optionsEnded && !$negativeNumber && str_starts_with($token, '-') && $token !== '-') {
                 $shorts        = substr($token, 1);
                 $consumedFully = false;
 
@@ -179,6 +188,14 @@ final class RequestParser
         foreach ($signature->options() as $opt) {
             if ($opt->required && !$opt->flag && !array_key_exists($opt->name, $options)) {
                 $errors[] = "Обязательная опция --{$opt->name} не задана";
+            }
+
+            if (!array_key_exists($opt->name, $options)) {
+                if ($opt->default !== null) {
+                    $options[$opt->name] = $opt->default;
+                } elseif ($opt->flag) {
+                    $options[$opt->name] = false;
+                }
             }
         }
 

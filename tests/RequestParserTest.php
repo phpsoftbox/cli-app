@@ -131,4 +131,54 @@ final class RequestParserTest extends TestCase
         self::assertTrue($req->hasErrors());
         self::assertStringContainsString('Неизвестная опция', $req->errors()[0]);
     }
+
+    /**
+     * Проверим, что после `--` все токены — позиционные аргументы, даже похожие на опции.
+     *
+     * @see RequestParser::parse()
+     */
+    #[Test]
+    public function doubleDashEndsOptions(): void
+    {
+        $signature = new Signature([
+            new ArgumentDefinition('first'),
+            new ArgumentDefinition('second'),
+            new OptionDefinition('force', 'f', flag: true),
+        ]);
+
+        $request = RequestParser::parse($signature, ['--', '--force', '-f']);
+
+        self::assertSame([], $request->errors());
+        self::assertSame('--force', $request->param('first'));
+        self::assertSame('-f', $request->param('second'));
+        self::assertFalse($request->option('force'));
+    }
+
+    /**
+     * Проверим, что отрицательное число — позиционный аргумент, а не короткая опция.
+     *
+     * @see RequestParser::parse()
+     */
+    #[Test]
+    public function negativeNumberIsArgument(): void
+    {
+        $request = RequestParser::parse(new Signature([new ArgumentDefinition('offset', type: 'int')]), ['-5']);
+
+        self::assertSame([], $request->errors());
+        self::assertSame(-5, $request->param('offset'));
+    }
+
+    /**
+     * Проверим, что повторяемая опция заменяет значение по умолчанию, а не дописывается к нему.
+     *
+     * @see RequestParser::parse()
+     */
+    #[Test]
+    public function repeatableOptionReplacesDefault(): void
+    {
+        $signature = new Signature([new OptionDefinition('tag', 't', default: ['default'], repeatable: true)]);
+
+        self::assertSame(['a', 'b'], RequestParser::parse($signature, ['--tag', 'a', '-t', 'b'])->option('tag'));
+        self::assertSame(['default'], RequestParser::parse($signature, [])->option('tag'));
+    }
 }

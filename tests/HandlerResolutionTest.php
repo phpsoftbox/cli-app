@@ -223,4 +223,35 @@ final class HandlerResolutionTest extends TestCase
 
         $app->resolveHandler($definition);
     }
+
+    /**
+     * Проверим, что отсутствие вложенной зависимости обработчика сообщается как ошибка контейнера, а не как «нельзя
+     * создать без контейнера».
+     *
+     * @see CliApp::resolveHandler()
+     */
+    #[Test]
+    public function reportsMissingNestedDependency(): void
+    {
+        $registry  = new InMemoryCommandRegistry(withDefaultCommands: false);
+        $container = new class () implements ContainerInterface {
+            public function get(string $id): mixed
+            {
+                throw new class ('Entry "db.dsn" is not found.') extends RuntimeException implements NotFoundExceptionInterface {
+                };
+            }
+
+            public function has(string $id): bool
+            {
+                return true;
+            }
+        };
+
+        $registry->register(Command::define('dep', 'Dependent', [], DependentHandler::class));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Entry "db.dsn" is not found.');
+
+        new CliApp($registry, new NullIo(), $container)->runCommand('dep', []);
+    }
 }
