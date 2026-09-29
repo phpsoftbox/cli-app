@@ -66,4 +66,35 @@ final class RunnerSubCommandTest extends TestCase
         self::assertSame('child', $captured['child']);
         self::assertSame('parent', $captured['after']);
     }
+
+    /**
+     * Проверим, что после `--help` вложенной команды request внешней команды восстанавливается.
+     *
+     * @see Runner::run()
+     */
+    #[Test]
+    public function restoresRequestAfterHelp(): void
+    {
+        $registry = new InMemoryCommandRegistry(withDefaultCommands: false);
+
+        $app  = new CliApp($registry, new NullIo());
+        $seen = null;
+
+        $registry->register(Command::define('inner', 'Inner', [], static fn (): int => Response::SUCCESS));
+        $registry->register(Command::define(
+            name: 'outer',
+            description: 'Outer',
+            signature: [new ArgumentDefinition('name')],
+            handler: function (RunnerInterface $runner) use (&$seen): int {
+                $runner->run('inner', ['--help']);
+                $seen = $runner->request()->param('name');
+
+                return Response::SUCCESS;
+            },
+        ));
+
+        $app->runner()->run('outer', ['anton']);
+
+        self::assertSame('anton', $seen);
+    }
 }

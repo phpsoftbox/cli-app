@@ -9,18 +9,23 @@ use PhpSoftBox\CliApp\Events\Events;
 
 use function array_map;
 use function array_merge;
+use function escapeshellarg;
 use function fgets;
 use function function_exists;
 use function fwrite;
 use function implode;
 use function in_array;
+use function is_resource;
+use function is_string;
 use function max;
 use function mb_strlen;
 use function posix_isatty;
 use function rtrim;
+use function shell_exec;
 use function str_repeat;
 use function stream_isatty;
 use function strtolower;
+use function trim;
 
 use const PHP_EOL;
 use const STDIN;
@@ -61,9 +66,44 @@ final class ConsoleIo implements IoInterface
         return in_array($answer, ['y', 'yes', '1', 'true'], true);
     }
 
+    /**
+     * Ввод без отображения: в терминале эхо выключается через `stty -echo`. Без терминала (pipe, тесты) ввод читается
+     * как обычно — показывать там нечего.
+     */
     public function secret(string $question): string
     {
-        return $this->ask($question);
+        if (!$this->isInteractiveTerminal()) {
+            return $this->ask($question);
+        }
+
+        $mode = shell_exec('stty -g 2>/dev/null');
+        if (!is_string($mode) || trim($mode) === '') {
+            return $this->ask($question);
+        }
+
+        shell_exec('stty -echo 2>/dev/null');
+
+        try {
+            $answer = $this->ask($question);
+        } finally {
+            shell_exec('stty ' . escapeshellarg(trim($mode)) . ' 2>/dev/null');
+            $this->writeRaw(PHP_EOL);
+        }
+
+        return $answer;
+    }
+
+    private function isInteractiveTerminal(): bool
+    {
+        if (!function_exists('shell_exec') || !is_resource($this->stdin)) {
+            return false;
+        }
+
+        if (function_exists('stream_isatty')) {
+            return stream_isatty($this->stdin);
+        }
+
+        return function_exists('posix_isatty') && posix_isatty($this->stdin);
     }
 
     public function writeln(string $message, string $style = 'info'): void

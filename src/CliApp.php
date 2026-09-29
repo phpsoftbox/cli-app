@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpSoftBox\CliApp;
 
+use Closure;
 use PhpSoftBox\CliApp\Command\CommandDefinition;
 use PhpSoftBox\CliApp\Command\CommandRegistryInterface;
 use PhpSoftBox\CliApp\Command\DaemonHandlerInterface;
@@ -22,19 +23,47 @@ use RuntimeException;
 use Throwable;
 
 use function class_exists;
+use function getenv;
 use function is_array;
 use function is_callable;
 use function is_string;
 
 final class CliApp implements CliAppInterface
 {
+    private readonly ?Closure $environmentResolver;
+
+    /**
+     * @param (callable(): string)|null $environmentResolver окружение приложения (например, `Environment::detect()`
+     *                                                       скелета): по нему проверяются `environments` команд и
+     *                                                       чистятся кеши, если `--environment` не передан
+     */
     public function __construct(
         private readonly CommandRegistryInterface $registry,
         private readonly IoInterface $io,
         private readonly ?ContainerInterface $container = null,
         private readonly EventDispatcherInterface $events = new NullEventDispatcher(),
         private readonly ErrorHandlerInterface $errorHandler = new DefaultErrorHandler(),
+        ?callable $environmentResolver = null,
     ) {
+        $this->environmentResolver = $environmentResolver === null ? null : Closure::fromCallable($environmentResolver);
+    }
+
+    /**
+     * Окружение приложения: из резолвера, иначе `APP_ENV` процесса, иначе `dev`.
+     */
+    public function environment(): string
+    {
+        if ($this->environmentResolver !== null) {
+            return ($this->environmentResolver)();
+        }
+
+        foreach ([$_ENV['APP_ENV'] ?? null, $_SERVER['APP_ENV'] ?? null, getenv('APP_ENV')] as $value) {
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return 'dev';
     }
 
     public function runCommand(string $command, array $argv): Response
@@ -90,7 +119,15 @@ final class CliApp implements CliAppInterface
         if ($this->container) {
             try {
                 return $this->container->get($class);
-            } catch (NotFoundExceptionInterface) {
+            } catch (NotFoundExceptionInterface $exception) {
+                // Не найдена вложенная зависимость, а не сам обработчик: сообщаем её, а не «нужен контейнер».
+                if ($this->container->has($class)) {
+                    throw new RuntimeException(
+                        'Failed to resolve class "' . $class . '" from container: ' . $exception->getMessage(),
+                        0,
+                        $exception,
+                    );
+                }
             } catch (Throwable $exception) {
                 throw new RuntimeException(
                     'Failed to resolve class "' . $class . '" from container: ' . $exception->getMessage(),

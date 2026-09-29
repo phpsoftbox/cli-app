@@ -14,4 +14,9 @@ interface RunnerInterface
     public function runSubCommand(string $command, array $argv): Response;
     public function request(): Request;
     public function io(): IoInterface;
+
+    /**
+     * Окружение команды: `--environment`, если передан, иначе окружение приложения.
+     */
+    public function environment(): string;
 }

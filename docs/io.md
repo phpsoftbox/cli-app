@@ -4,7 +4,8 @@
 
 - `ask($question, $default = null): string`
 - `confirm($question, $default = false): bool`
-- `secret($question): string` — базовая реализация не скрывает ввод (можно заменить свою).
+- `secret($question): string` — ввод без отображения: в терминале эхо выключается через `stty -echo`; без терминала
+  (pipe, тесты) ввод читается как обычный.
 - `writeln($message, $style = 'info')` — стили: info/comment/success/error (ANSI, если поддерживается).
 - `table($headers, $rows)` — рисует простую таблицу.
 - `progress($max): ProgressInterface` — прогресс-бар (`advance()`, `finish()`).

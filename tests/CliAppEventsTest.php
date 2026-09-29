@@ -11,10 +11,12 @@ use PhpSoftBox\CliApp\Events\EventDispatcher;
 use PhpSoftBox\CliApp\Events\Events;
 use PhpSoftBox\CliApp\Io\NullIo;
 use PhpSoftBox\CliApp\Response;
+use PhpSoftBox\CliApp\Runner\Runner;
 use PhpSoftBox\CliApp\Runner\RunnerInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 #[CoversClass(CliApp::class)]
 #[CoversClass(EventDispatcher::class)]
@@ -64,5 +66,35 @@ final class CliAppEventsTest extends TestCase
         self::assertSame(1, $seen['before']);
         self::assertSame(1, $seen['after']);
         self::assertSame(1, $seen['error']);
+    }
+
+    /**
+     * Проверим, что исключение обработчика отправляет событие ERROR и пробрасывается дальше.
+     *
+     * @see Runner::run()
+     */
+    #[Test]
+    public function dispatchesErrorOnHandlerException(): void
+    {
+        $registry = new InMemoryCommandRegistry(withDefaultCommands: false);
+        $events   = new EventDispatcher();
+        $errors   = [];
+
+        $registry->register(Command::define('boom', 'Fails', [], static function (): never {
+            throw new RuntimeException('Handler failed.');
+        }));
+        $events->subscribe(Events::ERROR, function (array $payload) use (&$errors): void {
+            $errors[] = $payload['exception'] ?? null;
+        });
+
+        try {
+            new CliApp($registry, new NullIo(), null, $events)->runCommand('boom', []);
+            self::fail('Exception expected.');
+        } catch (RuntimeException) {
+            // ожидаемо
+        }
+
+        self::assertCount(1, $errors);
+        self::assertInstanceOf(RuntimeException::class, $errors[0]);
     }
 }

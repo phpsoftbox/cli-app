@@ -53,4 +53,27 @@ final class ProviderLazyLoadTest extends TestCase
         self::assertNotNull($def);
         self::assertSame('high', $def->description);
     }
+
+    /**
+     * Проверим, что при равном приоритете get() и all() выбирают одну и ту же команду (зарегистрированную позже).
+     *
+     * @see InMemoryCommandRegistry::get()
+     * @see InMemoryCommandRegistry::all()
+     */
+    #[Test]
+    public function getAndAllAgreeOnEqualPriority(): void
+    {
+        $byGet = new InMemoryCommandRegistry(withDefaultCommands: false);
+
+        $byGet->addProvider(ProviderLow::class, 5);
+        $byGet->addProvider(ProviderHigh::class, 5);
+
+        $byAll = new InMemoryCommandRegistry(withDefaultCommands: false);
+
+        $byAll->addProvider(ProviderLow::class, 5);
+        $byAll->addProvider(ProviderHigh::class, 5);
+        $all = $byAll->all();
+
+        self::assertSame($all[0]->description, $byGet->get('dup:cmd')?->description);
+    }
 }

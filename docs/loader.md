@@ -7,7 +7,8 @@
 - `CommandRegistryInterface` — контракт.
 - `InMemoryCommandRegistry` — базовая реализация (алиасы указывают на одно определение, по умолчанию регистрирует `list`).
   Отключить можно так: `new InMemoryCommandRegistry(withDefaultCommands: false)`.
-  Также добавляет глобальные опции: `--environment/-e`, `--help/-h`.
+  Также добавляет глобальные опции: `--environment/-e` (без значения по умолчанию, см. `RunnerInterface::environment()`),
+  `--help/-h`.
 
 ## Загрузчик файлов
 
